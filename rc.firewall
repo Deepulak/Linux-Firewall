@@ -1,0 +1,575 @@
+#!/bin/
+# Internet-connecte interface
+INTERNET="eth0"
+# Howerver your system names it
+LOOPBACK_INTERFACE="lo"
+# Your IP address
+IPADDR="10.0.2.15"
+# ISP server & NOC address range
+MY_ISP="27.147.207.211"
+# Your subnet's network address
+SUBNET_BASE="255.255.255.0"
+# Your subnet's broadcast address
+SUBNET_BROADCAST="10.0.2.255"
+# Reserved loopback address range
+LOOPBACK = "127.0.0.1/8"
+# Class A private networks
+CLASS_A="10.0.0.0/8"
+# Class B private network
+CLASS_B="172.16.0.0/12"
+# Class C private network
+CLASS_C="192.168.0.0/16"
+# Class D multicast address
+CLASS_D_MULTICAST="224.0.0.0/4"
+# Class E reserved address
+CLASS_E_RESERVED_NET="240.0.0.0/5"
+# Broadcast source address
+BORADCASR_SOURCE="0.0.0.0"
+# Broadcast destination address
+BROADCAST_DEST="255.255.255.255"
+# Well known, privileged port range
+PRIVPORTS="0-1023"
+# Unprivileged port range
+UNPRIVPORTS="1024-65525" 
+# Locations of iptables on your system
+IPT="/usr/sbin/iptables"
+# Locations of nft on your system
+NFT="/usr/sbin/nft"
+# Enable broadcast echo Protection
+echo "1" > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts
+# Disable source routed packets
+echo "0" > /proc/sys/net/ipv4/conf/all/accept_source_route
+# Enable TCP SYN cookies protection
+echo 1 > /proc/sys/net/ipv4/tcp_syncookies
+# Disable ICMP redirect acceptance
+ech0 "0" > /proc/sys/net/ipv4/conf/all/accpt_redirects
+# Don't send redirect message
+echo "0" > /proc/sys/net/ipv4/conf/all/send_redirects
+# Drop spoofed packets coming in on an interface, which,  if replied to,
+# would result in the reply going out a different interface.
+for f in /proc/sys/net/ipv4/conf/* /rp_filter; do
+	exho "1" > $f
+done
+# Log packets with impossible addresses
+echo "1" > /proc/sys/net/ipv4/conf/all/log_martians
+# Remove any existing rules from all chains
+$IPT --flush
+# Specific tables can be flushed using the -t <table> option
+$IPT -t nat --flush
+$IPT -t mangle --flush
+# flushing command
+# nft flush table filter
+# nft flush table nat
+# a loop for flushing all chains in all tables
+for i in "$NFT list tables | awk '{print $2}'"
+do
+	echo "Flushing ${i}"
+	$NFT flush table ${i}
+done
+# A better method is to delete not only the rules but also the chains and then the tables
+# themselves
+for i in "$NFT list tables | awk '{print $2}'"
+do
+	echo "Flushing ${i}"
+	$NFT Flush tables ${i}
+	for j in "$NFT list table ${i} | grep chain | awk '{print $2'"
+	do
+		echo "...Deleting chain ${j} from table ${i}"
+		$NFT delete chain ${i} ${j}
+	done
+	echo "Deleting ${i}"
+	$NFT delete tables ${i}
+done
+# For iptables , the next step would be to delete any user-defined chains. They can be
+# deleted with the following commands:
+#$IPT -X
+#$IPT -t nat -X
+#$IPT -t mangle -X
+# Rest the default policy
+$IPT --policy INPUT ACCEPT
+$IPT --policy OUTPUT ACCEPT
+$IPT --policy FORWARD ACCEPT
+$IPT -t nat --policy PREROUTING ACCEPT
+$IPT -t nat --policy OUTPUT ACCEPT
+$IPT -t nat --policy POSTROUTING ACCEPT
+$IPT -t mangle --policy PREROUTING ACCEPT
+$IPT -t mangle --policy OUTPUT ACCEPT
+# when you call the script with an argument of "stop" , the script will
+# flush, clear, and reset the default policies and the firewall will effectively stop:
+if ["$1" = "stop" ]
+then
+echo "Firewall completely sopped! WARNING: THIS HOST HAS NO FIREWALL RUNNING."
+exit 0
+fi
+table filter {
+	chain input {
+		type filter hook input priority 0;
+	}
+	chain output {
+		type filter hook output priority 0;
+	}
+}
+$NFT -f setup-tables
+# Unlimited traffic on the loopback interface
+$IPT -A INPUT -i lo -j ACCEPT
+$IPT -A OUTPUT -o lo -j ACCEPT
+table filter {
+	chain input {
+		iifname lo accept
+	}
+	chain output {
+	oifname lo accept
+	}
+}
+$NFT -f localhost-policy
+$NFT add rult filter input iifname lo accept
+$NFT add rule filter output oifname lo accept
+# Set the default policy to drop
+$IPT --policy INPUT DROP
+$IPT --policy OUTPUT DROP
+$IPT --policy FORWARD DROP
+# Including both static and dynamic iptables rules
+$IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+	$IPT -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+	# Using the state module alone, INVALID will break protocols that use
+	# bi-directional connectioins or multiple connections or exchanges,
+	# unless an ALG is provided for the protocol
+
+	$IPT -A INPUT -m state --state INVALID -j LOG \
+		--log-prefix "INVALID input: "
+	$IPT -A input -m state --state INVALID -j DROP
+
+	$IPT -A OUTPUT -m state --state INVALID -j LOG \
+		--log-prefix "INVALID output: "
+	$IPT -A OUTPUT -m state --state INVALID -j DROP
+$NFT add rule filter input ct state established,related accept
+$NFT add rule filter input ct state invalid log prefix \ "INVALID input: \" limit
+# rate 3/second drop
+$NFT add rule filter output ct state established,related accept
+$NFT add rule filter output ct state invalid log prefix \"INVALID output: \"
+# limit rate 3/second drop
+# Refuse spoofed packets pretending to be from
+# the external interface's IP address
+$IPT -A INPUT -i $INTERNET -s $IPADDR -j DROP
+$NFT add rule filter input iif $INTERNET ip saddr $IPADDR 
+# Refuse packets claiming to be from a Class A private network
+$IPT -A INPUT -i $INTERNET -s $CLASS_A -j DROP
+# Refuse packets claiming to be from a Class B private network
+$IPT -A INPUT -i $INTERNET -s $CLASS_B -j DROP
+# Refuse packets claiming to be from a Class C private network
+$IPT -A INPUT -i $INTERNET -s $CLASS_C -j DROP
+# Refuse packets claiming to be from the loopback interface
+$IPT -A INPUT -i $INTERNET -s $LOOPBACK -j DROP
+# This is go for NFT rules
+$NFT add rule filter input iif $INTERNET ip saddr $CLASS_A drop
+$NFT add rule filter input iif $INTERNET ip saddr $CLASS_B drop
+$NFT add rule filter input iif $INTERNET ip saddr $CLASS_C drop
+$NFT add rule filter input iif $INTERNET ip saddr $LOOPBACK drop
+# Refuse malformed broadcast packets
+$IPT -A INPUT -i $INTERNET -s $BROADCAST_DEST -j LOG
+$IPT -A INPUT -i $INTERNET -s $BROADCAST_DEST -j DROP
+
+$IPT -A INPUT -i $INTERNET -d $BROADCAST_SRC -j LOG
+$IPT -A INPUT -i $INTERNET -d $BROADCAST_SRC -j DROP
+# For nftables
+$NFT add rule filter input iif $INTERNET ip saddr $BROACASR_DEST log limit
+#rate 3/second drop
+$NFT add rule filter input iif $INTERNET ip saddr $BROACASR_SRC log limit
+#rate 3/second drop
+# Refuse directed broadcast
+# Used to map networks and in Denial of Service attacks
+$IPT -A INPUT -i $INTERNET -d $SUBNET_BASE -j DROP
+$IPT -A INPUT -i $INTERNET -d $SUBNET_BROADCAST -j DROP
+# Nftables rules look like this
+$NFT add rule filter input iif $INTERNET ip daddr $SUBNET_BASE drop
+$NFT add rule filter input iif $INTERNET ip daddr $SUBNET_BROADCAST drop
+# Refuse limited broadcasts
+$IPT -A INPUT -i $INTERNET -d $BROADCAST_DEST -j DROP
+# nftables rules
+$NFT add rule filter input iif $INTERNET ip daddr $BROADCAST_DEST drop
+# Refuse Class D multicast addresses
+# Illegal as a source address
+$IPT -A INPUT -i $INTERNET -s $CLASS_D_MULTICAST -j DROP
+# nftables
+$NFT add rule filter input iif $INTERNET ip saddr $CLASS_D_MULTICAST drop
+# The next rule denies multicast packets carrying a non-UDP
+# protocol:
+$IPT -A INPUT -i $INTERNET ! -p udp -d $CLASS_D_MULTICAST -j DROP
+# nftables
+$NFT add rule filter input iif $INTERNET ip daddr $CLASS_D_MULTICAST ip protocol != udp drop
+# The next rule allows incoming
+# multicast packets for the sake of completeness:
+$PT -A INPUT -i $INTERNET -p udp -d CLASS_D_MULTICAST -j ACCEPT
+# nf tables
+$NFT add rule filter input iif $INTERNET ip daddr $CLASS_D_MULTICAST ip protocol udp accept
+# Refuse Class E reserved IP addresses
+$IPT -A INPUT -i $INTERNET -s $CLASS_E_RESERVED_NET -j DROP
+# nftables
+$NFT add rule filter input iif $INTERNET ip saddr $CLASS_E_RESERVED_NET drop
+# (TCP) X Window
+XWINDOW_PORTS="6000:6063"
+# X Window connection establishment
+$IPT -A OUTPUT -o $INTERNET -p tcp --syn \
+	--destination-port $XWINDOW_PORTS -j REJECT
+# nftables
+XWINDOW_PORTS="6000-6063"
+$NFT add rule filter output oif $INTERNET ct state new tcp dport $XWINDOW_PORTS reject
+# X Window: incoming connection attempt
+$IPT -A INPUT -i $INTERNET -p tcp --syn \	
+	--destination-port $XWINDOW_PORTS -j DROP
+# NFtables entry
+$NFT add rule filter input iif $INTERNET ct state new tcp dport $XWINDOW+PORTS drop
+# (TCP) NFS
+NFS_PORT="2049"
+# (TCP) socks
+SOCKS_PORT="1080"
+# (TCP) Openwindows$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-m multiport --destination-port \
+	$NFS_PORT,$OPENWINDOWS_PORT,$SOCKS_PORT,$SQUID_PORT \
+	--syn -j REJECT
+OPENWINDOWS_PORT="2000"
+# (TCP) squid
+SQUID_PORT="3128"
+# Establishing a connection over TCP to NFS, OpenWindows, SOCKS or squid
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-m multiport --destination-port \
+	$NFS_PORT,$OPENWINDOWS_PORT,$SOCKS_PORT,$SQUID_PORT \
+	--syn -j REJECT
+$IPT -A INPUT -o $INTERNET -p tcp \
+	-m multiport --destination-port \
+	$NFS_PORT,$OPENWINDOWS_PORT,$SOCKS_PORT,$SQUID_PORT \
+	--syn -DROP
+# For nftables , the same variables can be used and placed into rules that look like this:
+$NFT add rule filter output iif $INTERNET \
+tcp dport \
+{$NFS_PORT,$SOCKS_PORT,$OPENWINDOWS_PORT,$SQUID_PORT} \
+ct state new reject
+$NFT add rule filter input iif $INTERNET \
+tcp dport \
+{$NFS_PORT,$SOCKS_PORT,$OPENWINDOWS_PORT,$SQUID_PORT} \
+ct state new drop
+# NFS
+NFS_PORT="2049"
+# RPC lockd for NFS
+LOCKD_PORT="4045"
+# NFS and lockd
+$IPT -A OUTPUT -o $INTERNET -p udp \	
+	-m multiport --destination-port $NFS_PORT,$LOCKD_PORT \
+	-j REJECT
+$IPT -A INPUT -o $INTERNET -p udp \	
+	-m multiport --destination-port $NFS_PORT,$LOCKD_PORT \
+	-j DROP
+# nftables rules like this
+$NFT add rule filter output oif $INTERNET udp dport \
+{$NFS_PORT,$LOCKD_PORT} reject
+$NFT add rule filter input oif $INTERNET udp dport \
+{$NFS_PORT,$LOCKD_PORT} drop
+# DNS sends a lookup request as a UDP datagram
+NAMESERVER="my.name.server"  # (TCP/UDP)  DNS
+if ["$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p udp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $NAMESERVER --dport 53 \
+	-m state --state NEW -j ACCEPT
+fi 
+
+$IPT -A OUTPUT -o $INTERNET -p udp \
+	-s $IPADDR --sport $UNPIRVPORTS \
+	-d $NAMESERVER --dport 53 -j ACCEPT
+
+$IPT -A INPUT -i $INTERNET -p udp \
+	-s $NAMESERVER --sport 53 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR udp sport $UNPRIVPORTS \
+ip daddr $NAMESERVER udp dport 53 ct state new accept
+$NFT add rule filter input iif $INTERNET ip daddr $IPADDR udp dport $UNPRIVPORTS \
+ip saddr $NAMESERVER udp sport 53 accept
+
+if ["$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $NAMESERVER --dport 53 \
+	-m state --state NEW -j ACCEPT
+
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $NAMESERVER --dport 53 -j ACCEPT
+
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	-s $NAMESERVER --sport 53 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+# NFTtables rules look like this
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport $UNPRIVPORTS \
+ip daddr $NAMESERVER tcp dport 53 ct state new accept
+$NFT add rule filter input iif $INTERNET ip daddr $IPADDR tcp dport $UNPRIVPORTS \
+ip saddr $NAMESERVER tcp sport 53 tcp flags != syn accept
+# The following two rules enable you to relay mail through your ISP’s SMTP gateway:
+# External mail server or relay
+SMTP_GATEWAY="mys.isp.server"
+if [" $CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $INPRIVPORTS \
+	-d $SMTP_GATEWAY --dport 25 state --state NEW -j ACCEPT
+fi
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $SMTP_GATEWAY --dport 25 -j ACCEPT
+
+$IPT -A INPUT -o $INTERNET -p tcp ! --syn \
+	-s $SMTP_GATEWAY --sport 25 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+
+# The nftables commands look like this:
+$NFT add rule filter output oif $INTERNET ip daddr $SMTP_GATEWAY tcp dport 25 ip saddr $IPADDR tcp sport $UNPRIVPORTS accept
+$NFT add rule filter input iif $INTERNET ip saddr $SMTP_GATEWAY tcp sport 25 ip daddr $IPADDR tcp dport $UNPRIVPORTS tcp flags != syn accpet
+# The following two rules enable you to send mail directly to the remote destinations:
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport 25 -m state --state NEW -j ACCEPT
+
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport 25 -j ACCEPT
+
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	--sport 25 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+
+# The nftables command looks like this 
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport $UNPIRVPORTS tcp dprt 25 accept
+$NFT ad drule filter input iif $INTERNET ip daddr $IPADDR tcp sport 25 tcp dport $UNPRIVPORTS tcp flags != syn accept
+
+# Receiving Mail as a Local SMTP Server (TCP Port 25 )
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A INPUT -i $INTERNET -p tcp \
+		--sport $UNPRIVPORTS \
+		-d $IPADDR --dport 25 \
+		-m state --state NEW -j ACCEPT  
+fi
+
+$IPT -A INPUT -i $INTERNET -p tcp \
+	--sport $UNPRIVPORTS \
+	-d $IPADDR --dport 25 -j ACCEPT
+$IPT -A OUTPUT -o $INTERNET -p tcp ! --syn \
+	-s $IPADDR --sport 25 \
+	--dport $UNPRIVPORTS -j ACCEPT
+
+# NFTABLES command
+$NFT add rule filter input iif $INTERNET tcp sport $UNPRIVPORTS ip daddr $IPADDR tcp dport 25 accept
+$ NFT add rule filter output oif $INTERNET tcp sport 25 ip saddr $IPADDR tcp dport $UNPRIVPORTS tcp flags != syn accept
+# External pop server, if any
+POP_SERVER="my.isp.pop.server"
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $POP_SERVER --dport 110 -m state --state NEW -j ACCEPT
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $POP_SERVER --dport 110 -j ACCEPT
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	-s $POP_SERVER --sport 110 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+
+# The commands for nftables look like the following; substitute 110 in place of 995 if
+# your mail server uses regular POP without SSL:
+
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR ip daddr $POP_SERVER tcp sport $UNPRIVPORTS tcp dport 995 accept
+$NFT add rule filter input iif $INTERNET ip saddr $POP_SERVER tcp sport 110 ip daddr $IPADDR tcp dport $UNPRIVPORTS tcp flags != syn accept
+# Receiving Mail as an IMAP Client (TCP Port 143 or 993 )
+# implied $ANYWHERE specifier. IMAP accounts are user accounts associated with a specific
+# user and password:
+# External imap servver, if any
+IMAP_SERVER="my.isp.imap.server"
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $IMAP_SERVER --dport 143 -m state --state NEW -j ACCEPT
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $IMAP_SERVER --dport 143 -j ACCEPT
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	-s $IMAP_SERVER --sport 143 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+# The nftables rules look like the following; substitute 143 in place of 993 if your
+# IMAP server doesn’t use SSL:
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport $UNPRIVPORTS ip daddr $IMAP_SERVER tcp dport 993 accept
+$NFT add rule filter input iif $INTERNET ip saddr $IMAP_SERVER tcp sport 995 ip daddr $IPADDR tcp dport $UNPRIVPORTS tcp flags != syn accept
+# Hosting a POP Server for Remote Clients
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A INPUT -i $INTERNET -p tcp \
+		-s <my.pop.client> --sport $UNPRIVPORTS \
+		-d $IPADDR --dport 110 \
+		-m state --state NEW -j ACCEPT
+fi
+$IPT -A INPUT -i $INTERNET -p tcp \
+	-s <my.pop.clients> --sport $UN{PRIVPORTS \
+	-d $IPADDR --dport 110 -j ACCEPT
+$IPT -A OUTPUT -o $INTERNET -p tcp ! --syn \
+	-s $IPADDR --sport 110 \
+	-d <my.pop.clients> --dport $UNPRIVPORTS -j ACCEPT
+# THe nftables looks like this
+$NFT add rule filter input iif $INTERNET ip saddr <POP_CLIENTS> tcp sport $UNPRIVPORTS ip daddr $IPADDR tcp dport 995 accept
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport 995 daddr <POP_CLIENTS> tcp dport $UNPRIVPORTS tcp flags != syn accept
+# RSA authentication
+SSH_PORTS="1024:65535"
+# or
+# Rhost authentication
+SSH_PORTS="1020:65535"
+# Allowing Client Access to Remote SSH Servers
+# These rules allow you to connect to remote sites using SSH:
+if [ "CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+		-s $IPADDR --sport $SSH_PORTS \
+		--dport 22 -m state --state NEW -j ACCEPT
+fi
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $SSH_PORTS \
+	--dport 22 -j ACCEPT
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	--sport 22 \
+	-d $IPADDR --dport $SSH_PORTS -j ACCEPT
+# THE nftables look like 
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport $SSH_PORTS tcp dport 22 accept
+$NFT add rule filer input iif $INTERNET tcp sport 22 ip daddr $IPADDR tcp dport $SSH_PORTS tcp flags != syn accept
+# Allowing Remote Client Access to Your Local SSH Server
+# These rules allow incoming connections to your SSH server:
+if [ "CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A INPUT -i $INTERNET -p tcp \
+		--sport $SSH_PORTS \
+		-d $IPADDR --dport 22 \
+		-m state --state NEW -j ACCEPT
+fi
+
+$IPT -A INPUT -i $INTERNET -p tcp \
+	--sport $SSH_PORTS \
+	-d $IPADDR --dport 22 -j ACCEPT
+$IPT -A OUTPUT -o $INTERNET -p tcp ! --syn \
+	-s $IPADDR --sport 22 \
+	--dport $SSH_PORTS -j ACCEPT
+
+# for the nftables
+$NFT add rule filter input iif $INTERNET tcp sport $SSH_PORTS ip daddr $IPADDR tcp dport 22 accept
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport 22 tcp dport $SSH_PORTS tcp flasgs != syn accept
+# FTP (TCP Ports 21 , 20 )
+# Outgoing FTP Requests over the Control Channel
+# The next two rules allow an outgoing control connection to a remote FTP server:
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+		-s $IPADDR --sport $UNPRIVPORTS \
+		--dport 21 -m state --state NEW -j ACCEPT
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport 21 -j ACCEPT
+$ IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	--sport 21 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+# THE NFTABLES Shit
+$NFT add rule filter output oif $INTERNET ip saddr tcp sport $UNPRIVPORTS tcp dport 21 accept
+$NFT add rule filter input iif $INTERNET ip daddr $IPADDR tcp sport 21 tcp dport $UNPRIVPORTS accept		 
+# Port-Mode FTP Data Channels
+#The next two rules allow the standard data channel connection, in which the remote
+#server calls back to establish the data connection from server port 20 to a client-specified
+#unprivileged port:
+if [ "CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A INPUT -i $INTERNET -p tcp \
+	--sport 20 \
+	-d $IPADDR --dport $UNPRIVPORTS \
+	-m state --state NEW -j ACCEPT
+fi
+
+$IPT -A INPUT -i $INTERNET -p tcp \
+	--sport 20 \
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+
+$IPT -A OUTPUT -o $INTERNET -p tcp ! --syn \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport 20 -j ACCEPT
+# Generic TCP Service
+if [ "CONNECTIO_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport <YOUR PORT HERE> -m state --state NEW -j ACCEPT
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p tcp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	--dport <YOUR PORT HERE> -j ACCEPT
+
+$IPT -A INPUT -i $INTERNET -p tcp ! --syn \
+	--sport <YOUR PORT HERE>
+	-d $IPADDR --dport $UNPRIVPORTS -j ACCEPT
+# THe nftables rules like this
+$NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport $UNPRIVPORTS tcp dport <YOUR PORT HERE> accept
+$NFT add rule filter input iif $INTERNET tcp sport <YOUR PORT HERE> ip daddr $IPADDR tcp dport $UNPRIVPORTS accept
+# The following rules apply to enabling an incoming TCP connection on whatever port
+# is necessary for the given service: 
+if [ "CONECTION_TRACKING" = "1" ]; then
+	$IPT -A INPUT -i $INTERNET -p tcp \
+		--sport $UNPRIVPORTS \
+		-d $IPADDR --dport <YOUR PORT HERE> \
+		-m state --state NEW -j ACCEPT
+fi
+
+$IPT -A INPUT -i $INTERNET -p tcp \
+	--sport $UNPRIVPORTS \
+	-d $IPADDR --dport <YOUR POST HERE> -j ACCPET
+
+$IPT -A OUTPUT  -o $INTERNET -p tcp \
+	-s $IPADDR \
+	--dport $UNPRIVPORTS -j ACCEPT
+# THe rule fors nftables are as follows:
+NFT add rule filter input iif $INTERNET tcp sport $UNPRIVPORTS ip daddr $IPADDR tcp dport <TOUR POST HERE> accept
+NFT add rule filter output oif $INTERNET ip saddr $IPADDR tcp sport <YOUR POST HERE> tcp dport $UNPRIVPORTS accept
+# Inititalization or rebinding: No lease or Lease time expired.
+$IPT -A OUTPUT -o $INTERNET -p udp \
+	-s $BROADCAST_SRC --sport 76:68 \
+	pd BROADCAST_DEST --dport 67:68 -j ACCEPT
+# Incoming DHCPOFFER from available DHCP servers
+$IPT -A INPUT -i $INTERNET -p udp \
+	--sport 67:68 \
+	--dport 67:68 -j ACCEPT
+#THE nf tables look like this
+$NFT add rule filter output oif $INTERNET ip saddr $BROADCAST_SRC udp sport 67-68 ip daddr $BROADCASR_DEST udp dport 67-68 accept
+$NFT add rule filter input iif $INTERNET udp sport 67-68 udp sport 67-68 accept
+# External time server, if any
+TIME_SERVER="my.time.server"
+
+if [ "$CONNECTION_TRACKING" = "1" ]; then
+	$IPT -A OUTPUT -o $INTERNET -p udp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $TIME_SERVER --dport 123  \
+	-m state --state NEW -j ACCEPT  
+
+fi
+
+$IPT -A OUTPUT -o $INTERNET -p udp \
+	-s $IPADDR --sport $UNPRIVPORTS \
+	-d $TIME_SERVER --dport 123 -j ACCEPT
+
+$IPT -A INPUT -i $INTERNET -p udp \
+	-s $TIME_SERVER --sport 123 \
+	-d $IPADDDR --sport $UNPRIVPORTS -j ACCEPT
+# THe nf tables script rules here
+$NFT add rule filter output oif $INTERNET ip saddr $IPADD udp sport $UNPRIVPORTS ip daddr $TIME_SERVER udp dport 124 accept
+$NFT add rule filter input iif $INTERNET ip saddr $TIME_SERVER udp sport 123 ip daddr $IPADDR udp dport  $UNPRIVPORTS accept
+
+# LOG FUNCTION
+$IPT -A INPUT -i $INTERNET -j LOG
+# for nftables
+$NFT add rule filter input iif $INTERNET log
+# LOG OUTPUT
+# All traffic about to be dropped by the default policy could be logged:
+$IPT -A OUTPUT -o $INTERNET -j LOG
+# For nftables
+$NFT add rule filter output oif $INTERNET log

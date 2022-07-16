@@ -1,0 +1,322 @@
+OSI - Open System Interconnection
+
+Its a book name - TCP/IP Illustrated Vol-1 Second edition Kevin R Fall  
+
+CIDR - Classless Inter domain Routing
+
+MTU - Maximum Transmission Unit
+
+ICMP - Internet Control Message Protocol
+
+chapter 2
+
+start on Local destination Port filtering
+
+chapter 3
+
+iptables Feature
+
+spi - security parameter indices
+
+AH - Authentication Header
+ESP - Encapsulating Security Ppayload
+
+Element Description
+| A bar or pipe symbol separates alternative syntax options. For
+example, most of the iptables commands have both a short and
+a long form, such as -L and --list, and so they would be listed
+as alternative options because you would use one or the other of
+-L or --list.
+<value> Angle brackets indicate a user-supplied value, such as a string or
+numeric value.
+[ ] Square brackets indicate that the enclosed command, option, or
+value is optional. For example, most match operators can take a
+negation operator, !, which matches anything other than the value
+specified in the match. The negation operator is usually placed
+between the match operator and the value to be matched.
+<value>:<value> A colon indicates a range of values. The two values define the
+minimum and maximum values within the range. Because ranges
+themselves are optional, the convention is more often presented
+as <value>[:<value>].
+
+iptables -p tcp -h
+
+iptables -p udp -h
+
+icmp filter Table Match Operation
+The ICMP header match option is listed in Table 3.8.
+The major supported ICMP type names and numeric values are the following:
+■
+■
+echo-reply ( 0 )
+destination-unreachable ( 3 )
+■ network-unreachable
+■ host-unreachable
+■ protocol-unreachable
+■ port-unreachable
+■ fragmentation-needed
+■ network-unknown
+■ host-unknown
+■ network-prohibited
+■ host-prohibited
+■ source-quench (4)
+■ redirect (5)
+■ echo-request (8)
+■ time-exceeded (10)
+■ parameter-problem (11
+
+
+iptables -p icmp -h
+iptables -p ipv6-icmp -h
+
+iptables -A INPUT -i eth0 -p udp\
+-m multiport --destination-port 135,136,137,138,139 -j DROP
+
+
+iptables -A OUTPUT -o eth0 -p tcp\
+-m multiport --destination-port 2049,1080,3128 --syn -j REJECT
+
+Name Description
+ANYCAST An anycast packet
+BLACKHOLE A blackhole address
+BROADCAST A broadcast address
+LOCAL A local address
+MULTICAST A multicast address
+PROHIBIT A prohibited address
+UNICAST A unicast address
+UNREACHABLE An unreachable address
+UNSPEC An unspecified address
+
+nftables
+
+nft list tables
+
+nft add table filter
+
+nft list table filter
+
+Table 4.2 Payload Expressions for IPv4
+Expression Description
+checksum Checksum of the IP header
+daddr Destination IP address
+frag-off Fragmentation offset
+hdrlength Length of the IP header, including options
+id IP identifier
+length Total length of the packet
+protocol Protocol in use at the layer above IP
+saddr Source IP address
+tos Type of Service value
+ttl Time to Live value
+version IP header version, which will always be 4 for IPv4 expressions
+
+Table 4.3 IPv6 Header Expressions
+Expression Description
+daddr Destination IP address
+flowlabel Flow label
+hoplimit Hop limit
+length Length of the payload
+nexthdr Nexthdr protocol
+priority Priority value
+saddr Source IP address
+version IP header version, which will always be 6 for IPv6 expressions
+
+
+Table 4.4 TCP Header Expressions
+Expression Description
+ackseq Acknowledgment number
+checksum Checksum of the packet
+doff Data offset
+dport Port to which the packet is destined
+flags TCP flags
+sequence Sequence number
+sport Port from which the packet originated
+urgptr Urgent pointer value
+window TCP window value
+
+Table 4.5 UDP Header Expressions
+Expression Description
+checksum Checksum of the packet
+dport Port to which the packet is destined
+length Total length of the packet
+sport Port from which the packet originated
+
+
+Table 4.6 ARP Header Expressions
+Expression Description
+hlen Hardware address length
+htype ARP hardware type
+op Operation
+plen Protocol address length
+ptype EtherType
+
+chapter 5
+
+
+we need to create a script called rc.firewall and the location /etc/init.d/
+
+For iptables , the next step would be to delete any user-defined chains. They can be
+deleted with the following commands:
+$IPT -X
+$IPT -t nat -X
+$IPT -t mangle -X
+
+Protecting Services on Assigned
+Unprivileged Ports page 112
+
+NFS - Network File System
+
+Enabling Basic, Required Internet Services  page 122
+
+
+start with Allowing Your DNS Lookups as a Forwarding Server
+
+POP/S and IMAP/S run on port 995 and 993 respectively.
+
+Sending Mail over SMTP (TCP Port 25 )
+
+Retrieving Mail as a POP Client (TCP Port 110 or 995 )
+
+implied $ANYWHERE specifier. IMAP accounts are user accounts associated with a specific
+user and password:
+
+If your site were an ISP, you could use network address masking to limit which source
+addresses you would accept POP connection requests from:
+POP_CLIENTS="192.168.24.0/24"
+
+SSH_PORTS="1024:65535"
+# RSA authentication
+or
+SSH_PORTS="1020:65535"
+# Rhost authentication
+
+FTP (TCP Ports 21 , 20 )
+
+■
+■
+Dynamic Host Configuration Protocol (DHCP)
+Network Time Protocol (NTP)
+
+Accessing Your ISP’s DHCP Server (UDP Ports 67 , 68 )
+
+Accessing Remote Network Time Servers (UDP Port 123 )
+
+# Installing the firewall
+This section covers the commands as if the script
+was installed in either /etc/rc.d/ for a Red Hat or SUSE system or /etc/init.d/ for
+a Debian system.
+As a shell script, initial installation is simple. The script should be owned by root . On
+Red Hat and SUSE:
+chown root.root /etc/rc.d/rc.firewall
+
+On Debian:
+chown root.root /etc/init.d/rc.firewall
+The script should be writable and executable by root alone. Ideally, the general user
+should not have read access. On Red Hat and SUSE:
+chmod u=rwx /etc/rc.d/rc.firewall
+On Debian:
+chmod u=rwx /etc/init.d/rc.firewall
+
+To initialize the firewall at any time, execute the script from the command line. There
+is no need to reboot:
+/etc/rc.d/rc.firewall start
+
+# Stop
+/etc/rc.d/rc.firewall stop
+
+# ON DEbian 
+/etc/init.d/rc.firewall start
+# stop
+/etc/init.d/rc.firewall stop
+
+If you’d like to use this method, set a cron entry with the following command
+as root (on Debian):
+crontab -e
+*/2 * * * * /etc/init.d/rc.firewall stop
+On Red Hat and SUSE:
+crontab -e
+*/2 * * * * /etc/rc.d/rc.firewall stop
+
+With this cron entry in place, you can start the firewall and have it stop every 2 min-
+utes. Using such a mechanism is somewhat of a trade-off though, because you have to do
+your initial debugging before the clock hits a minute divisible by two! Additionally, it’s up
+to you to remember to remove this cron entry when you’ve debugged the firewall. If you
+forget to remove this entry, the firewall will stop and you’ll be running with no firewall
+again!
+
+
+first manually install the firewall rules:
+/etc/rc.d/rc.firewall
+Then execute the command
+/etc/init.d/iptables save
+The rules will be saved in a file, /etc/sysconfig/iptables . After this, the startup
+script will find this file and load the saved rules automatically.
+A word of caution is in order about saving and loading the firewall rules using this
+method. The iptables save and load features are not fully debugged at this point.
+If your particular firewall configuration results in a syntax error when saving or loading
+
+# DEBIAN
+As with many other things, configuring the firewall script to start on boot is simpler on
+Debian than on other distributions. You can make the firewall start and stop on boot
+with the update-rc.d command. Run update-rc.d with the firewall script in /etc/
+init.d , and set your current directory to /etc/init.d/ as well:
+cd /etc/init.d
+update-rc.d rc.firewall defaults
+See the man page for update-rc.d for more information on its usage beyond that
+shown here.
+
+it.d/ as well:
+cd /etc/init.d
+update-rc.d rc.firewall defaults
+See the man page for update-rc.d for more information on its usage beyond that
+shown here.
+Other aspects of the firewall script depend on whether you have a registered, static IP
+address or a dynamic, DHCP-assigned IP address. The firewall script as presented in this
+chapter is set up for a site with a statically assigned, permanent IP address.
+Installing a Firewall with a Dynamic IP Address
+If you have a dynamically assigned IP address, the standard firewall installation method
+won’t work without modification. The firewall rules would be installed before the net-
+work interfaces are brought up, before the system is assigned an IP address, and possibly
+before being assigned a default gateway router or name servers.
+The firewall script itself needs the IPADDR and NAMESERVER values defined. Both the
+DHCP server and the local /etc/resolv.conf file can define up to three name serv-
+ers. Also, any given site may or may not know the addresses of their name servers, default
+gateway router, or DHCP server ahead of time. Furthermore, it’s not uncommon for your
+network mask, subnet, and broadcast addresses to change over time as the ISP renumbers
+its network. Some ISPs assign a different IP address on a frequent basis, with the result that
+your IP address can change numerous times during the course of an ongoing connection.
+Your site must provide some means of dynamically updating the installed firewall rules
+as these changes occur. Appendix B, “Firewall Examples and Support Scripts,” provides
+sample scripts designed to handle these changes automatically.
+The firewall script could read these shell variables directly from the environment or
+could read them from a file. In any case, the variables would not be hard-coded into the
+firewall script, as they are in the example in this chapter.
+
+
+rthermore, it’s not uncommon for your
+network mask, subnet, and broadcast addresses to change over time as the ISP renumbers
+its network. Some ISPs assign a different IP address on a frequent basis, with the result that
+your IP address can change numerous times during the course of an ongoing connection.
+Your site must provide some means of dynamically updating the installed firewall rules
+as these changes occur. Appendix B, “Firewall Examples and Support Scripts,” provides
+sample scripts designed to handle these changes automatically.
+The firewall script could read these shell variables directly from the environment or
+could read them from a file. In any case, the variables would not be hard-coded into the
+firewall script, as they are in the example in this chapter.
+
+
+
+II
+Advanced Issues,
+Multiple Firewalls,
+and Perimeter
+Networks
+
+starting point
+
+
+Use Traffic Flow to Determine Where to Place Rules
+for Multiple Network Interfaces
+
+start from
+Place Firewall Rules for Heavily Used Services
+as Early as Possible
